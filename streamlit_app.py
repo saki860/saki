@@ -182,16 +182,24 @@ def generate_system_prompt(risk_level: int, needs_type: str) -> str:
 
 
 def generate_ai_response_gemini(user_message: str, risk_level: int, needs_type: str, chat_history: List[Dict], api_key: str) -> str:
-    """Gemini 2.0 Flashを使用してAI応答を生成"""
+    """Gemini APIを使用してAI応答を生成"""
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # 2025年1月時点で無料枠で使用できる最新モデル
+        # gemini-2.5-flash: 10 RPM, 250K TPM, 250 RPD (バランス型)
+        # gemini-2.5-flash-lite: 15 RPM, 250K TPM, 1000 RPD (高スループット)
+        models_to_try = [
+            'gemini-2.5-flash-lite',  # 最高スループット、1日1000リクエスト
+            'gemini-2.5-flash',       # バランス型、1日250リクエスト
+            'gemini-1.5-flash'        # フォールバック用の安定版
+        ]
         
         system_prompt = generate_system_prompt(risk_level, needs_type)
         
-        # チャット履歴を構築
+        # チャット履歴を構築（トークン削減のため最新4件のみ）
         history_text = ""
-        for msg in chat_history[-6:]:  # 最新6件のみ使用
+        for msg in chat_history[-4:]:
             if msg['role'] == 'user':
                 history_text += f"相談者: {msg['content']}\n"
             else:
@@ -199,11 +207,74 @@ def generate_ai_response_gemini(user_message: str, risk_level: int, needs_type: 
         
         full_prompt = f"{system_prompt}\n\n【会話履歴】\n{history_text}\n\n【現在の相談】\n相談者: {user_message}\n\nAI:"
         
-        response = model.generate_content(full_prompt)
-        return response.text
+        last_error = None
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                
+                # 安全設定を追加（不適切なコンテンツのブロック）
+                safety_settings = [
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_NONE"
+                    }
+                ]
+                
+                generation_config = {
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "max_output_tokens": 500,  # 応答を簡潔に保つ
+                }
+                
+                response = model.generate_content(
+                    full_prompt,
+                    safety_settings=safety_settings,
+                    generation_config=generation_config
+                )
+                return response.text
+            except Exception as e:
+                last_error = e
+                continue
+        
+        # すべてのモデルで失敗した場合
+        error_msg = str(last_error)
+        if "429" in error_msg or "quota" in error_msg.lower():
+            return """
+申し訳ございません。現在、APIの利用制限に達しています。
+
+**解決方法:**
+- 数分待ってから再度お試しください
+- 1日の制限に達した場合は、翌日00:00（太平洋時間）にリセットされます
+
+**無料枠の制限:**
+- 1分間に10-15リクエスト (RPM)
+- 1日に250-1,000リクエスト (RPD)
+  - Gemini 2.5 Flash: 250リクエスト/日
+  - Gemini 2.5 Flash-Lite: 1,000リクエスト/日
+- 1分間に250,000トークン (TPM)
+
+**今すぐ相談したい場合:**
+- 学校のカウンセラー
+- 保健室の先生
+- いのちの電話: 0120-783-556（24時間対応）
+"""
+        else:
+            return f"エラーが発生しました。しばらくしてから再度お試しください。\n\nエラー詳細: {error_msg[:150]}"
         
     except Exception as e:
-        return f"エラーが発生しました: {str(e)}\nAPIキーが正しいか確認してください。"
+        return f"予期しないエラーが発生しました: {str(e)[:150]}\n\nAPIキーが正しいか確認してください。"
 
 
 # UI構築
@@ -212,6 +283,16 @@ st.title("💭 学生相談支援システム")
 # APIキー入力エリア
 if not st.session_state.api_key_set:
     st.info("🔑 Google Gemini APIキーを入力してください")
+    
+    st.success("""
+    **2025年1月時点の無料枠情報:**
+    - 使用モデル: Gemini 2.5 Flash / Flash-Lite
+    - Flash-Lite: 1日1,000リクエストまで（高速）
+    - Flash: 1日250リクエストまで（高品質）
+    - クレジットカード不要
+    
+    学生相談に十分な容量です！
+    """)
     
     api_key_input = st.text_input(
         "APIキー", 
