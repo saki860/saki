@@ -2,13 +2,13 @@ import streamlit as st
 import json
 import datetime
 from typing import Dict, List, Tuple
-import re
+import google.generativeai as genai
 
 # ページ設定
 st.set_page_config(
     page_title="学生相談支援システム",
     page_icon="💭",
-    layout="wide"
+    layout="centered"
 )
 
 # セッション状態の初期化
@@ -18,6 +18,10 @@ if 'feedback_data' not in st.session_state:
     st.session_state.feedback_data = []
 if 'current_risk_level' not in st.session_state:
     st.session_state.current_risk_level = 0
+if 'api_key_set' not in st.session_state:
+    st.session_state.api_key_set = False
+if 'show_info' not in st.session_state:
+    st.session_state.show_info = False
 
 # リスクレベル判定用キーワード辞書
 RISK_KEYWORDS = {
@@ -59,28 +63,18 @@ NEEDS_KEYWORDS = {
 
 
 def analyze_risk_level(text: str) -> Tuple[int, List[str]]:
-    """
-    相談内容からリスクレベルを判定
-    
-    Args:
-        text: 相談テキスト
-    
-    Returns:
-        リスクレベル(1-5)と検出されたキーワードのリスト
-    """
+    """相談内容からリスクレベルを判定"""
     detected_keywords = []
     risk_scores = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
     
     text_lower = text.lower()
     
-    # 各リスクレベルのキーワードをチェック
     for level, data in RISK_KEYWORDS.items():
         for keyword in data['keywords']:
             if keyword in text_lower:
                 risk_scores[level] += data['weight']
                 detected_keywords.append(keyword)
     
-    # 最も高いスコアのレベルを返す
     max_level = 1
     max_score = 0
     for level, score in risk_scores.items():
@@ -92,12 +86,7 @@ def analyze_risk_level(text: str) -> Tuple[int, List[str]]:
 
 
 def analyze_needs(text: str) -> str:
-    """
-    相談者のニーズを分析
-    
-    Returns:
-        'listening', 'solution', 'thinking' のいずれか
-    """
+    """相談者のニーズを分析"""
     text_lower = text.lower()
     needs_scores = {'listening': 0, 'solution': 0, 'thinking': 0}
     
@@ -106,17 +95,14 @@ def analyze_needs(text: str) -> str:
             if keyword in text_lower:
                 needs_scores[need_type] += 1
     
-    # 最もスコアの高いニーズを返す
     if max(needs_scores.values()) == 0:
-        return 'listening'  # デフォルトは傾聴
+        return 'listening'
     
     return max(needs_scores, key=needs_scores.get)
 
 
 def generate_system_prompt(risk_level: int, needs_type: str) -> str:
-    """
-    リスクレベルとニーズに応じたシステムプロンプトを生成
-    """
+    """リスクレベルとニーズに応じたシステムプロンプトを生成"""
     base_guardrails = """
 あなたは学生向けの相談支援AIアシスタントです。以下のガードレールを厳守してください:
 - 医療的診断や治療の提供は行わない
@@ -124,6 +110,7 @@ def generate_system_prompt(risk_level: int, needs_type: str) -> str:
 - 個人情報の収集や保存を求めない
 - 常に相談者の安全を最優先する
 - 専門家ではないことを明示する
+- 応答は簡潔で温かみのあるトーンで、200文字程度を目安にする
 """
     
     risk_prompts = {
@@ -194,227 +181,196 @@ def generate_system_prompt(risk_level: int, needs_type: str) -> str:
     return prompt
 
 
-def generate_ai_response(user_message: str, risk_level: int, needs_type: str, chat_history: List[Dict]) -> str:
-    """
-    AI応答を生成（実際の実装ではClaude APIやOpenAI APIを使用）
-    ここではデモ用の応答生成
-    """
-    system_prompt = generate_system_prompt(risk_level, needs_type)
-    
-    # 実際の実装では、ここでClaude APIを呼び出す
-    # 以下はデモ用の応答例
-    
-    if risk_level >= 4:
-        response = f"""
-{user_message}について、お話しいただきありがとうございます。
-とても辛い状況なのですね。あなたの気持ちを受け止めます。
-
-ただ、私はAIなので専門的なサポートには限界があります。
-今のあなたには、人間の専門家によるサポートが必要だと感じます。
-
-以下の相談先をぜひ検討してください:
-- 学校のカウンセラー
-- 保健室の先生
-- 信頼できる先生や大人
-
-{'緊急の場合は、24時間対応のいのちの電話(0120-783-556)もご利用いただけます。' if risk_level == 5 else ''}
-
-一人で抱え込まないでください。あなたは一人じゃありません。
-"""
-    elif needs_type == 'listening':
-        response = f"""
-{user_message}について、お話しいただきありがとうございます。
-{user_message[:20]}...という状況、とても大変ですね。
-
-あなたの気持ち、よくわかります。そのような状況では、誰でも辛く感じると思います。
-もう少し詳しく聞かせていただけますか?
-"""
-    elif needs_type == 'solution':
-        response = f"""
-{user_message}についてですね。いくつかの方法を一緒に考えてみましょう。
-
-考えられるアプローチとして:
-1. まず信頼できる人に相談してみる
-2. 小さなステップから始めてみる
-3. 自分のペースを大切にする
-
-これらの中で、試してみたいと思うものはありますか?
-"""
-    else:  # thinking
-        response = f"""
-{user_message}について、一緒に考えていきましょう。
-
-まず、あなた自身はどう感じていますか?
-それぞれの選択肢について、あなたが大切にしたいことは何でしょうか?
-"""
-    
-    return response
-
-
-def save_feedback(message_id: int, rating: int, comment: str):
-    """フィードバックを保存"""
-    feedback = {
-        'message_id': message_id,
-        'rating': rating,
-        'comment': comment,
-        'timestamp': datetime.datetime.now().isoformat()
-    }
-    st.session_state.feedback_data.append(feedback)
+def generate_ai_response_gemini(user_message: str, risk_level: int, needs_type: str, chat_history: List[Dict], api_key: str) -> str:
+    """Gemini 2.0 Flashを使用してAI応答を生成"""
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        system_prompt = generate_system_prompt(risk_level, needs_type)
+        
+        # チャット履歴を構築
+        history_text = ""
+        for msg in chat_history[-6:]:  # 最新6件のみ使用
+            if msg['role'] == 'user':
+                history_text += f"相談者: {msg['content']}\n"
+            else:
+                history_text += f"AI: {msg['content']}\n"
+        
+        full_prompt = f"{system_prompt}\n\n【会話履歴】\n{history_text}\n\n【現在の相談】\n相談者: {user_message}\n\nAI:"
+        
+        response = model.generate_content(full_prompt)
+        return response.text
+        
+    except Exception as e:
+        return f"エラーが発生しました: {str(e)}\nAPIキーが正しいか確認してください。"
 
 
 # UI構築
 st.title("💭 学生相談支援システム")
-st.markdown("---")
 
-# サイドバー
-with st.sidebar:
-    st.header("ℹ️ システム情報")
+# APIキー入力エリア
+if not st.session_state.api_key_set:
+    st.info("🔑 Google Gemini APIキーを入力してください")
     
-    st.info("""
-    このシステムは、学生の皆さんが安心して相談できる場を提供します。
+    api_key_input = st.text_input(
+        "APIキー", 
+        type="password",
+        help="APIキーはGoogle AI Studioで取得できます"
+    )
     
-    **特徴:**
-    - AIによる傾聴と支援
-    - リスクレベル自動判定
-    - あなたのニーズに合わせた応答
-    - 必要に応じて専門家への連携
-    """)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("APIキーを設定", type="primary", use_container_width=True):
+            if api_key_input:
+                st.session_state.api_key = api_key_input
+                st.session_state.api_key_set = True
+                st.rerun()
+            else:
+                st.error("APIキーを入力してください")
     
-    if st.session_state.current_risk_level > 0:
-        risk_color = {1: "🟢", 2: "🟡", 3: "🟠", 4: "🔴", 5: "🔴"}
-        st.metric(
-            "現在のリスクレベル", 
-            f"{risk_color.get(st.session_state.current_risk_level, '🟢')} レベル{st.session_state.current_risk_level}"
+    with col2:
+        st.link_button(
+            "APIキーを取得",
+            "https://aistudio.google.com/app/apikey",
+            use_container_width=True
         )
     
     st.markdown("---")
-    st.warning("""
+    st.markdown("""
+    ### 📱 このシステムについて
+    
+    学生の皆さんが安心して相談できる場を提供します。
+    
+    **特徴:**
+    - ✅ AIによる傾聴と支援
+    - ✅ あなたのニーズに合わせた応答
+    - ✅ 必要に応じて専門家への連携
+    
     **注意事項:**
-    - このシステムは専門的な医療やカウンセリングの代替ではありません
-    - 緊急時は必ず専門家にご相談ください
-    - 相談内容は安全に管理されます
+    - ⚠️ このシステムは専門的な医療やカウンセリングの代替ではありません
+    - ⚠️ 緊急時は必ず専門家にご相談ください
+    - 🔒 相談内容は安全に管理されます
     """)
     
-    if st.button("会話をリセット"):
-        st.session_state.chat_history = []
-        st.session_state.current_risk_level = 0
-        st.rerun()
-
-# メインエリア
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    st.subheader("相談窓口")
+else:
+    # メインチャットエリア
+    
+    # トップバーメニュー
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        st.markdown("### 💬 相談窓口")
+    with col2:
+        if st.button("ℹ️ 情報", use_container_width=True):
+            st.session_state.show_info = not st.session_state.show_info
+    with col3:
+        if st.button("🔄 リセット", use_container_width=True):
+            st.session_state.chat_history = []
+            st.session_state.current_risk_level = 0
+            st.rerun()
+    
+    # 情報パネル（トグル表示）
+    if st.session_state.show_info:
+        with st.expander("📊 システム情報", expanded=True):
+            if st.session_state.chat_history:
+                last_message = st.session_state.chat_history[-1]
+                if last_message['role'] == 'assistant':
+                    needs_labels = {
+                        'listening': '傾聴重視',
+                        'solution': '解決策提示',
+                        'thinking': '共に考える'
+                    }
+                    st.info(f"**検出ニーズ:** {needs_labels.get(last_message.get('needs_type', 'listening'))}")
+            
+            st.warning("""
+            **緊急時の連絡先:**
+            - いのちの電話: 0120-783-556
+            - 学校のカウンセラー
+            - 保健室の先生
+            """)
+            
+            if st.button("APIキーを変更"):
+                st.session_state.api_key_set = False
+                st.rerun()
+    
+    st.markdown("---")
     
     # チャット履歴表示
     chat_container = st.container()
     with chat_container:
+        if not st.session_state.chat_history:
+            st.info("👋 こんにちは。何でもお話しください。あなたの話を聞かせてください。")
+        
         for i, message in enumerate(st.session_state.chat_history):
             if message['role'] == 'user':
-                with st.chat_message("user"):
+                with st.chat_message("user", avatar="🙂"):
                     st.write(message['content'])
             else:
-                with st.chat_message("assistant"):
+                with st.chat_message("assistant", avatar="💭"):
                     st.write(message['content'])
                     
-                    # フィードバック機能
-                    with st.expander("この応答は役に立ちましたか?"):
-                        feedback_col1, feedback_col2 = st.columns([1, 3])
-                        with feedback_col1:
-                            rating = st.radio(
-                                "評価", 
-                                [1, 2, 3, 4, 5], 
-                                key=f"rating_{i}",
-                                horizontal=True,
-                                label_visibility="collapsed"
-                            )
-                        with feedback_col2:
-                            comment = st.text_input(
-                                "コメント(任意)", 
-                                key=f"comment_{i}",
-                                label_visibility="collapsed",
-                                placeholder="改善点などあればお聞かせください"
-                            )
-                        
-                        if st.button("送信", key=f"submit_{i}"):
-                            save_feedback(i, rating, comment)
-                            st.success("フィードバックありがとうございます!")
+                    # フィードバック機能（最新のメッセージのみ）
+                    if i == len(st.session_state.chat_history) - 1:
+                        with st.expander("この応答は役に立ちましたか？"):
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                rating = st.select_slider(
+                                    "評価", 
+                                    options=[1, 2, 3, 4, 5],
+                                    value=3,
+                                    key=f"rating_{i}"
+                                )
+                            with col2:
+                                if st.button("👍 送信", key=f"submit_{i}", use_container_width=True):
+                                    feedback = {
+                                        'message_id': i,
+                                        'rating': rating,
+                                        'timestamp': datetime.datetime.now().isoformat()
+                                    }
+                                    st.session_state.feedback_data.append(feedback)
+                                    st.success("ありがとうございます！")
 
-# ユーザー入力
-user_input = st.chat_input("相談内容を入力してください...")
+    # ユーザー入力（画面下部に固定）
+    st.markdown("---")
+    user_input = st.chat_input("相談内容を入力してください...")
 
-if user_input:
-    # ユーザーメッセージを追加
-    st.session_state.chat_history.append({
-        'role': 'user',
-        'content': user_input,
-        'timestamp': datetime.datetime.now().isoformat()
-    })
-    
-    # リスクレベル判定
-    risk_level, detected_keywords = analyze_risk_level(user_input)
-    st.session_state.current_risk_level = max(st.session_state.current_risk_level, risk_level)
-    
-    # ニーズ分析
-    needs_type = analyze_needs(user_input)
-    
-    # AI応答生成
-    ai_response = generate_ai_response(
-        user_input, 
-        risk_level, 
-        needs_type,
-        st.session_state.chat_history
-    )
-    
-    # AI応答を追加
-    st.session_state.chat_history.append({
-        'role': 'assistant',
-        'content': ai_response,
-        'timestamp': datetime.datetime.now().isoformat(),
-        'risk_level': risk_level,
-        'needs_type': needs_type,
-        'detected_keywords': detected_keywords
-    })
-    
-    st.rerun()
-
-with col2:
-    st.subheader("📊 分析情報")
-    
-    if st.session_state.chat_history:
-        last_message = st.session_state.chat_history[-1]
+    if user_input:
+        # ユーザーメッセージを追加
+        st.session_state.chat_history.append({
+            'role': 'user',
+            'content': user_input,
+            'timestamp': datetime.datetime.now().isoformat()
+        })
         
-        if last_message['role'] == 'assistant':
-            st.metric("リスクレベル", f"レベル {last_message.get('risk_level', 0)}")
-            
-            needs_labels = {
-                'listening': '傾聴重視',
-                'solution': '解決策提示',
-                'thinking': '共に考える'
-            }
-            st.metric("検出ニーズ", needs_labels.get(last_message.get('needs_type', 'listening')))
-            
-            if last_message.get('detected_keywords'):
-                st.write("**検出キーワード:**")
-                for kw in last_message['detected_keywords'][:5]:
-                    st.caption(f"- {kw}")
+        # リスクレベル判定
+        risk_level, detected_keywords = analyze_risk_level(user_input)
+        st.session_state.current_risk_level = max(st.session_state.current_risk_level, risk_level)
+        
+        # ニーズ分析
+        needs_type = analyze_needs(user_input)
+        
+        # AI応答生成（Gemini使用）
+        with st.spinner("考えています..."):
+            ai_response = generate_ai_response_gemini(
+                user_input, 
+                risk_level, 
+                needs_type,
+                st.session_state.chat_history,
+                st.session_state.api_key
+            )
+        
+        # AI応答を追加
+        st.session_state.chat_history.append({
+            'role': 'assistant',
+            'content': ai_response,
+            'timestamp': datetime.datetime.now().isoformat(),
+            'risk_level': risk_level,
+            'needs_type': needs_type,
+            'detected_keywords': detected_keywords
+        })
+        
+        st.rerun()
 
-# 管理者向けデータ表示（開発用）
-with st.expander("🔧 開発者向け情報"):
-    st.json({
-        'total_messages': len(st.session_state.chat_history),
-        'feedback_count': len(st.session_state.feedback_data),
-        'max_risk_level': st.session_state.current_risk_level
-    })
-    
-    if st.button("履歴データをダウンロード"):
-        data = {
-            'chat_history': st.session_state.chat_history,
-            'feedback_data': st.session_state.feedback_data
-        }
-        st.download_button(
-            "JSONダウンロード",
-            data=json.dumps(data, ensure_ascii=False, indent=2),
-            file_name=f"counseling_data_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
+# フッター
+st.markdown("---")
+st.caption("💡 このシステムは学生の相談支援を目的としています。緊急時は必ず専門家にご相談ください。")
