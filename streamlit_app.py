@@ -22,6 +22,10 @@ if 'api_key_set' not in st.session_state:
     st.session_state.api_key_set = False
 if 'show_info' not in st.session_state:
     st.session_state.show_info = False
+if 'summary' not in st.session_state:
+    st.session_state.summary = None
+if 'show_summary' not in st.session_state:
+    st.session_state.show_summary = False
 
 # リスクレベル判定用キーワード辞書
 RISK_KEYWORDS = {
@@ -181,6 +185,47 @@ def generate_system_prompt(risk_level: int, needs_type: str) -> str:
     return prompt
 
 
+def generate_conversation_summary(chat_history: List[Dict], api_key: str) -> str:
+    """会話全体のまとめを生成"""
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        
+        # 会話履歴を整形
+        conversation_text = ""
+        for msg in chat_history:
+            if msg['role'] == 'user':
+                conversation_text += f"相談者: {msg['content']}\n"
+            else:
+                conversation_text += f"AI: {msg['content']}\n"
+        
+        summary_prompt = f"""
+以下は学生相談システムでの会話履歴です。この会話を振り返り、以下の観点でまとめてください:
+
+【会話履歴】
+{conversation_text}
+
+【まとめる内容】
+1. 相談の主なテーマ（2-3行）
+2. 相談者の気持ちや状況（2-3行）
+3. 話し合った内容のポイント（3-5項目、箇条書き）
+4. 今後に向けてのヒント（2-3行）
+
+温かく、前向きなトーンでまとめてください。専門用語は避け、相談者が自分の状況を客観的に振り返れるようにしてください。
+"""
+        
+        generation_config = {
+            "temperature": 0.5,
+            "max_output_tokens": 800,
+        }
+        
+        response = model.generate_content(summary_prompt, generation_config=generation_config)
+        return response.text
+        
+    except Exception as e:
+        return f"まとめの生成中にエラーが発生しました: {str(e)[:150]}"
+
+
 def generate_ai_response_gemini(user_message: str, risk_level: int, needs_type: str, chat_history: List[Dict], api_key: str) -> str:
     """Gemini APIを使用してAI応答を生成"""
     try:
@@ -338,16 +383,27 @@ else:
     # メインチャットエリア
     
     # トップバーメニュー
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
         st.markdown("### 💬 相談窓口")
     with col2:
+        if st.button("📝 まとめ", use_container_width=True, disabled=len(st.session_state.chat_history) < 2):
+            if len(st.session_state.chat_history) >= 2:
+                with st.spinner("会話をまとめています..."):
+                    st.session_state.summary = generate_conversation_summary(
+                        st.session_state.chat_history,
+                        st.session_state.api_key
+                    )
+                    st.session_state.show_summary = True
+    with col3:
         if st.button("ℹ️ 情報", use_container_width=True):
             st.session_state.show_info = not st.session_state.show_info
-    with col3:
+    with col4:
         if st.button("🔄 リセット", use_container_width=True):
             st.session_state.chat_history = []
             st.session_state.current_risk_level = 0
+            st.session_state.summary = None
+            st.session_state.show_summary = False
             st.rerun()
     
     # 情報パネル（トグル表示）
@@ -373,6 +429,25 @@ else:
             if st.button("APIキーを変更"):
                 st.session_state.api_key_set = False
                 st.rerun()
+    
+    # まとめ表示パネル
+    if st.session_state.show_summary and st.session_state.summary:
+        with st.expander("📝 会話のまとめ", expanded=True):
+            st.markdown(st.session_state.summary)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ 閉じる", use_container_width=True):
+                    st.session_state.show_summary = False
+                    st.rerun()
+            with col2:
+                st.download_button(
+                    "💾 保存",
+                    data=st.session_state.summary,
+                    file_name=f"counseling_summary_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
     
     st.markdown("---")
     
