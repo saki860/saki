@@ -3,6 +3,7 @@ import json
 import datetime
 from typing import Dict, List, Tuple
 import google.generativeai as genai
+from gemini_errors import format_api_errors
 
 # ページ設定
 st.set_page_config(
@@ -256,7 +257,7 @@ def generate_conversation_summary(chat_history: List[Dict], api_key: str) -> str
         return response.text
 
     except Exception as e:
-        return f"まとめの生成中にエラーが発生しました: {str(e)[:150]}"
+        return format_api_errors([("gemini-2.5-flash-lite（まとめ）", e)])
 
 
 def generate_ai_response_gemini(
@@ -273,8 +274,7 @@ def generate_ai_response_gemini(
 
         models_to_try = [
             'gemini-2.5-flash-lite',
-            'gemini-2.5-flash',
-            'gemini-1.5-flash'
+            'gemini-2.5-flash'
         ]
 
         # ①モードを渡してプロンプト生成
@@ -302,7 +302,7 @@ def generate_ai_response_gemini(
             + f"【現在の相談】\n相談者: {user_message}\n\nサポーター:"
         )
 
-        last_error = None
+        errors = []
         for model_name in models_to_try:
             try:
                 model = genai.GenerativeModel(model_name)
@@ -327,28 +327,13 @@ def generate_ai_response_gemini(
                 )
                 return response.text
             except Exception as e:
-                last_error = e
+                errors.append((model_name, e))
                 continue
 
-        error_msg = str(last_error)
-        if "429" in error_msg or "quota" in error_msg.lower():
-            return """
-申し訳ございません。現在、APIの利用制限に達しています。
-
-**解決方法:**
-- 数分待ってから再度お試しください
-- 1日の制限に達した場合は、翌日00:00（太平洋時間）にリセットされます
-
-**今すぐ相談したい場合:**
-- 学校のカウンセラー
-- 保健室の先生
-- いのちの電話: 0120-783-556（24時間対応）
-"""
-        else:
-            return f"エラーが発生しました。しばらくしてから再度お試しください。\n\nエラー詳細: {error_msg[:150]}"
+        return format_api_errors(errors)
 
     except Exception as e:
-        return f"予期しないエラーが発生しました: {str(e)[:150]}\n\nAPIキーが正しいか確認してください。"
+        return format_api_errors([("初期化", e)])
 
 
 # ============================================================
