@@ -7,6 +7,7 @@ import datetime
 import random
 from typing import List, Dict, Tuple
 import google.generativeai as genai
+from gemini_errors import format_api_errors
 
 st.set_page_config(
     page_title="学生相談支援システム",
@@ -109,9 +110,8 @@ def gemini_response(message, history, api_key, risk, needs, mode):
     genai.configure(api_key=api_key)
 
     models=[
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-1.5-flash"
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash-lite"
     ]
 
     hist="\n".join(
@@ -128,7 +128,7 @@ def gemini_response(message, history, api_key, risk, needs, mode):
 {message}
 """
 
-    last_error=None
+    errors=[]
 
     for model_name in models:
         try:
@@ -143,14 +143,14 @@ def gemini_response(message, history, api_key, risk, needs, mode):
             )
             return res.text
         except Exception as e:
-            last_error=e
+            errors.append((model_name, e))
 
-    return f"応答生成エラー: {last_error}"
+    return format_api_errors(errors)
 
 def make_summary(history, api_key):
     try:
         genai.configure(api_key=api_key)
-        model=genai.GenerativeModel("gemini-2.5-flash")
+        model=genai.GenerativeModel("gemini-3.5-flash-lite")
 
         txt="\n".join(
             [f"{m['role']}:{m['content']}" for m in history]
@@ -168,7 +168,7 @@ def make_summary(history, api_key):
 """
         return model.generate_content(prompt).text
     except Exception as e:
-        return str(e)
+        return format_api_errors([("gemini-3.5-flash-lite（まとめ）", e)])
 
 # -------------------------
 # UI
