@@ -224,7 +224,7 @@ def generate_conversation_summary(chat_history: List[Dict], api_key: str) -> str
     """会話全体のまとめを生成"""
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
         conversation_text = ""
         for msg in chat_history:
@@ -257,7 +257,7 @@ def generate_conversation_summary(chat_history: List[Dict], api_key: str) -> str
         return response.text
 
     except Exception as e:
-        return format_api_errors([("gemini-2.5-flash-lite（まとめ）", e)])
+        return format_api_errors([("gemini-3.5-flash-lite（まとめ）", e)])
 
 
 def generate_ai_response_gemini(
@@ -273,7 +273,7 @@ def generate_ai_response_gemini(
         genai.configure(api_key=api_key)
 
         models_to_try = [
-            'gemini-2.5-flash-lite',
+            'gemini-3.5-flash-lite',
             'gemini-2.5-flash'
         ]
 
@@ -347,11 +347,10 @@ if not st.session_state.api_key_set:
     st.info("🔑 Google Gemini APIキーを入力してください")
 
     st.success("""
-    **2025年時点の無料枠情報:**
-    - 使用モデル: Gemini 2.5 Flash / Flash-Lite
-    - Flash-Lite: 1日1,000リクエストまで（高速）
-    - Flash: 1日250リクエストまで（高品質）
-    - クレジットカード不要
+    **使用モデル:**
+    - 通常: Gemini 3.5 Flash-Lite
+    - 応答に失敗した場合: Gemini 2.5 Flash
+    - 利用可能なモデル・料金・利用上限はGoogle AI Studioで確認してください。
     """)
 
     api_key_input = st.text_input(

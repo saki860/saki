@@ -110,7 +110,7 @@ def gemini_response(message, history, api_key, risk, needs, mode):
     genai.configure(api_key=api_key)
 
     models=[
-        "gemini-2.5-flash",
+        "gemini-3.5-flash-lite",
         "gemini-2.5-flash-lite"
     ]
 
@@ -150,7 +150,7 @@ def gemini_response(message, history, api_key, risk, needs, mode):
 def make_summary(history, api_key):
     try:
         genai.configure(api_key=api_key)
-        model=genai.GenerativeModel("gemini-2.5-flash")
+        model=genai.GenerativeModel("gemini-3.5-flash-lite")
 
         txt="\n".join(
             [f"{m['role']}:{m['content']}" for m in history]
@@ -168,7 +168,7 @@ def make_summary(history, api_key):
 """
         return model.generate_content(prompt).text
     except Exception as e:
-        return format_api_errors([("gemini-2.5-flash（まとめ）", e)])
+        return format_api_errors([("gemini-3.5-flash-lite（まとめ）", e)])
 
 # -------------------------
 # UI
